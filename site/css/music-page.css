@@ -2383,3 +2383,6 @@ body.is-debug .song-id { display: block; }
 }
 .stage .s-title { color: var(--stage-title-color); }
 .stage .s-artist { color: var(--stage-artist-color); }
+/* 歌词整体稍微透一点，压在模糊封面上更有层次（两套渲染器都放开一点） */
+.amll-wrap .amll-lyric-player { opacity: .88; }
+.stage[data-view] .lyrics { opacity: .92; }
