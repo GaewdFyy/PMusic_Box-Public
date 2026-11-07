@@ -2386,3 +2386,46 @@ body.is-debug .song-id { display: block; }
 /* 歌词整体稍微透一点，压在模糊封面上更有层次（两套渲染器都放开一点） */
 .amll-wrap .amll-lyric-player { opacity: .88; }
 .stage[data-view] .lyrics { opacity: .92; }
+
+/* ------------------------------------------------------- 网站背景图 */
+.site-bg {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  background-position: center;
+  background-size: cover;
+  opacity: 0;
+  transition: opacity .35s ease;
+  pointer-events: none;
+}
+
+.site-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .45);
+}
+
+html[data-scheme="light"] .site-bg::after { background: rgba(255, 255, 255, .5); }
+
+.app { z-index: 1; }
+
+.bg-url { display: flex; gap: .4rem; align-items: center; }
+.bg-url .text-input { width: 168px; min-height: 36px; font-size: .82rem; }
+
+
+/* 背景图模糊：往外扩一圈，避免高斯模糊把边缘虚掉露出底色 */
+.site-bg {
+  inset: -48px;
+  filter: blur(var(--bg-blur, 0px));
+  transform: translateZ(0);
+}
+
+/* 设置里 hidden 的行不能被 display:flex 顶掉 */
+.set-row[hidden],
+.set-note[hidden] { display: none !important; }
+
+/* 背景图压暗层再轻一点，图片能看出来 */
+.site-bg::after { background: rgba(0, 0, 0, .3); }
+html[data-scheme="light"] .site-bg::after { background: rgba(255, 255, 255, .42); }
+.site-bg.is-on { opacity: 1; }
