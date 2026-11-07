@@ -503,7 +503,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261204';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261206';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -2259,7 +2259,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261106c';
+      s.src = '/js/qrcode.js?v=20261206c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);

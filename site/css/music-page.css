@@ -2357,3 +2357,19 @@ body.is-debug .song-id { display: block; }
     -webkit-mask-image: none;
   }
 }
+/* 歌词页：轻量歌词与封面左对齐；AMLL 配色/翻译字号对齐轻量版 */
+@media (max-width: 900px) {
+  /* 轻量渲染器的行从容器左边缘开始，补 18px 与封面齐平 */
+  .stage[data-view="lyrics"] .lyrics { padding-left: 18px; }
+
+  /* AMLL 默认用 on-surface 白色；这里给成主题色（当前行更明显，其余行靠透明度压暗） */
+  .stage[data-view="lyrics"] .amll-wrap .amll-lyric-player {
+    --amll-lp-color: var(--primary);
+  }
+
+  /* 翻译行：AMLL 默认 0.5em / opacity .3，手机上又小又淡 */
+  .stage[data-view="lyrics"] .amll-lyric-player div[class*="lyricSubLine"] {
+    font-size: .65em !important;
+    opacity: .72 !important;
+  }
+}
