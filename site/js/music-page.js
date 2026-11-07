@@ -286,7 +286,7 @@
     // 进度点：一根竖线（替代原来的圆点）
     var ih = 11;
     ctx.strokeStyle = active;
-    ctx.lineWidth = 2.5;
+    ctx.lineWidth = 3.2;
     ctx.beginPath();
     ctx.moveTo(px, mid - ih / 2);
     ctx.lineTo(px, mid + ih / 2);
@@ -682,7 +682,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261215';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261216';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -2677,7 +2677,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261215c';
+      s.src = '/js/qrcode.js?v=20261216c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
