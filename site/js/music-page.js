@@ -226,8 +226,8 @@
 
   function wavePath(ctx, w, h, phase) {
     var mid = h / 2;
-    var amp = 3;
-    var len = 18;
+    var amp = 2;
+    var len = 34;
     ctx.beginPath();
     for (var x = 0; x <= w; x += 1) {
       var y = mid + Math.sin(x / len * Math.PI * 2 + phase) * amp;
@@ -248,7 +248,7 @@
     var active = waveColor(input, '--primary', '#DDC8C1');
     var idle = waveColor(input, '--outline', '#4F4643');
 
-    ctx.lineWidth = 3;
+    ctx.lineWidth = 3.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
@@ -275,7 +275,7 @@
     var input = item.input;
     var w = input.offsetWidth;
     if (!w) return;
-    var h = 14;
+    var h = 16;
     var dpr = Math.min(2, window.devicePixelRatio || 1);
     item.w = w;
     item.h = h;
@@ -297,7 +297,7 @@
     waveRaf = 0;
     var dt = waveLast ? Math.min(64, ts - waveLast) : 16;
     waveLast = ts;
-    wavePhase += dt / 1000 * 5;
+    wavePhase += dt / 1000 * 1.6;
     waveItems.forEach(drawWave);
     if (!audio.paused) waveRaf = requestAnimationFrame(waveLoop);
     else waveLast = 0;
@@ -646,7 +646,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261213';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261214';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -2641,7 +2641,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261213c';
+      s.src = '/js/qrcode.js?v=20261214c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
