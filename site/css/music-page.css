@@ -2429,3 +2429,15 @@ html[data-scheme="light"] .site-bg::after { background: rgba(255, 255, 255, .5);
 .site-bg::after { background: rgba(0, 0, 0, .3); }
 html[data-scheme="light"] .site-bg::after { background: rgba(255, 255, 255, .42); }
 .site-bg.is-on { opacity: 1; }
+
+/* 主题取色的 chip 多了一个，窄屏允许换行 */
+.seed { flex-wrap: wrap; }
+
+/* toast 放进 top layer，dialog / 大屏都盖得住 */
+.toast {
+  inset: auto auto 96px 50%;
+  margin: 0;
+  border: 0;
+}
+
+.toast:not(:popover-open) { display: none; }

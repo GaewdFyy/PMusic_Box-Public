@@ -8,7 +8,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>私享音乐盒</title>
 <link rel="icon" href="/favicon.svg">
-<link rel="stylesheet" href="/css/music-page.css?v=20261210">
+<link rel="stylesheet" href="/css/music-page.css?v=20261211">
 <script>
   (function () {
     // 首屏防闪：先按本地设置把深浅色和歌词字号贴上去，主脚本后面还会再对齐一次
@@ -367,6 +367,7 @@
         <div class="seed">
           <button class="chip" id="seed-follow" type="button">封面取色</button>
           <button class="chip" id="seed-bg" type="button">背景取色</button>
+          <button class="chip" id="seed-split" type="button">主页背景</button>
           <label class="swatch" title="选一个种子色">
             <input type="color" id="seed-color" value="#8B5643">
             <span aria-hidden="true"></span>
@@ -405,6 +406,15 @@
           <input class="slider" id="bg-blur" type="range" min="0" max="40" step="2" value="10">
           <output class="size-val" id="bg-blur-val">10px</output>
         </div>
+      </div>
+      <div class="set-row" id="bg-refresh-row" hidden>
+        <label class="set-label" for="bg-refresh">刷新</label>
+        <select class="text-input" id="bg-refresh">
+          <option value="open">每次打开页面</option>
+          <option value="daily">每天一次</option>
+          <option value="weekly">每周一次</option>
+          <option value="never">仅手动获取</option>
+        </select>
       </div>
       <p class="set-note" id="bg-note" hidden>背景图铺在页面最底层；主题配色可以选「背景取色」。</p>
     </section>
@@ -559,7 +569,7 @@
   window.MUSIC_TOKEN = '';
 </script>
 <!-- 改了 css/js 就顺手把 v= 改一下，否则浏览器 / Cloudflare 边缘会继续用旧缓存 -->
-<script src="/js/music-page.js?v=20261210" defer></script>
+<script src="/js/music-page.js?v=20261211" defer></script>
 
 </body>
 </html>

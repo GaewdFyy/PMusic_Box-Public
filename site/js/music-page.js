@@ -207,13 +207,24 @@
     if (!toastEl) {
       toastEl = document.createElement('div');
       toastEl.className = 'toast';
+      if ('popover' in toastEl) toastEl.setAttribute('popover', 'manual');
       document.body.appendChild(toastEl);
     }
     toastEl.textContent = msg;
+    if (toastEl.showPopover) {
+      try { if (!toastEl.matches(':popover-open')) toastEl.showPopover(); } catch (e) {}
+    }
     void toastEl.offsetWidth;
     toastEl.classList.add('show');
     clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () { toastEl.classList.remove('show'); }, 3200);
+    toastTimer = setTimeout(function () {
+      toastEl.classList.remove('show');
+      setTimeout(function () {
+        if (toastEl.hidePopover) {
+          try { if (toastEl.matches(':popover-open')) toastEl.hidePopover(); } catch (e) {}
+        }
+      }, 220);
+    }, 3200);
   }
 
   function fail(msg) {
@@ -503,7 +514,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261210';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261211';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -1063,7 +1074,15 @@
   function activeHue() {
     if (settings.seedMode === 'custom' && settings.seed) return hexToHue(settings.seed);
     if (settings.seedMode === 'bg' && bgHue) return bgHue;
+    // 主页用背景图、大屏仍用封面（stageHue 单独处理）
+    if (settings.seedMode === 'split' && bgHue) return bgHue;
     return themeHue;
+  }
+
+  /** 大屏的色相：split 模式下固定跟随歌曲封面 */
+  function stageHue() {
+    if (settings.seedMode === 'split') return themeHue;
+    return activeHue();
   }
 
   function paintTheme() {
@@ -1086,7 +1105,7 @@
    */
   function paintStageTheme() {
     if (!stage) return;
-    var hue = activeHue();
+    var hue = stageHue();
     if (!hue) {
       PALETTE_KEYS.forEach(function (k) { stage.style.removeProperty(k); });
       return;
@@ -1825,7 +1844,7 @@
   function loadSettings() {
     var out = {
       scheme: 'auto', seed: '', seedMode: 'cover',
-      bgMode: 'none', bgData: '', bgUrl: '', bgBlur: 10,
+      bgMode: 'none', bgData: '', bgUrl: '', bgBlur: 10, bgRefresh: 'open', bgFetchedAt: 0,
       lyricScale: 1, trans: true, amll: true, bold: false, debug: false, offset: 0
     };
     try {
@@ -1834,12 +1853,18 @@
         var o = JSON.parse(raw) || {};
         if (o.scheme === 'auto' || o.scheme === 'light' || o.scheme === 'dark') out.scheme = o.scheme;
         if (typeof o.seed === 'string' && /^#[0-9a-f]{6}$/i.test(o.seed)) out.seed = o.seed;
-        if (o.seedMode === 'cover' || o.seedMode === 'bg' || o.seedMode === 'custom') out.seedMode = o.seedMode;
+        if (o.seedMode === 'cover' || o.seedMode === 'bg' || o.seedMode === 'custom' || o.seedMode === 'split') {
+          out.seedMode = o.seedMode;
+        }
         else if (out.seed) out.seedMode = 'custom';
         if (o.bgMode === 'none' || o.bgMode === 'local' || o.bgMode === 'url') out.bgMode = o.bgMode;
         if (typeof o.bgData === 'string' && /^data:image\//.test(o.bgData)) out.bgData = o.bgData;
         if (typeof o.bgUrl === 'string' && /^https?:\/\//.test(o.bgUrl)) out.bgUrl = o.bgUrl;
         if (typeof o.bgBlur === 'number' && o.bgBlur >= 0 && o.bgBlur <= 40) out.bgBlur = o.bgBlur;
+        if (o.bgRefresh === 'open' || o.bgRefresh === 'daily' || o.bgRefresh === 'weekly' || o.bgRefresh === 'never') {
+          out.bgRefresh = o.bgRefresh;
+        }
+        if (typeof o.bgFetchedAt === 'number') out.bgFetchedAt = o.bgFetchedAt;
         if (typeof o.lyricScale === 'number' && o.lyricScale >= 0.8 && o.lyricScale <= 1.5) {
           out.lyricScale = o.lyricScale;
         }
@@ -1884,6 +1909,7 @@
   var segScheme = $('seg-scheme');
   var seedFollow = $('seed-follow');
   var seedBg = $('seed-bg');
+  var seedSplit = $('seed-split');
   var seedColor = $('seed-color');
   var segBg = $('seg-bg');
   var bgLocalRow = $('bg-local-row');
@@ -1892,6 +1918,8 @@
   var bgNote = $('bg-note');
   var bgFile = $('bg-file');
   var bgLink = $('bg-link');
+  var bgRefreshRow = $('bg-refresh-row');
+  var bgRefreshSel = $('bg-refresh');
   var bgBlur = $('bg-blur');
   var bgBlurVal = $('bg-blur-val');
   var bgEl = $('site-bg');
@@ -1913,7 +1941,9 @@
 
     seedFollow.setAttribute('aria-pressed', settings.seedMode === 'cover' ? 'true' : 'false');
     seedBg.setAttribute('aria-pressed', settings.seedMode === 'bg' ? 'true' : 'false');
+    seedSplit.setAttribute('aria-pressed', settings.seedMode === 'split' ? 'true' : 'false');
     seedBg.disabled = !bgSource();
+    seedSplit.disabled = !bgSource();
 
     var bgBtns = segBg.querySelectorAll('button');
     for (var j = 0; j < bgBtns.length; j += 1) {
@@ -1922,6 +1952,8 @@
     bgLocalRow.hidden = settings.bgMode !== 'local';
     bgUrlRow.hidden = settings.bgMode !== 'url';
     bgBlurRow.hidden = settings.bgMode === 'none';
+    bgRefreshRow.hidden = settings.bgMode !== 'url';
+    bgRefreshSel.value = settings.bgRefresh || 'open';
     bgNote.hidden = settings.bgMode === 'none';
     if (settings.bgMode === 'url') bgLink.value = settings.bgUrl || '';
     bgBlur.value = String(settings.bgBlur || 0);
@@ -1987,6 +2019,17 @@
     syncSettingsUI();
   });
 
+  seedSplit.addEventListener('click', function () {
+    if (!bgSource()) {
+      toast('先选一张背景图');
+      return;
+    }
+    settings.seedMode = 'split';
+    saveSettings();
+    paintTheme();
+    syncSettingsUI();
+  });
+
   seedColor.addEventListener('input', function () {
     settings.seed = seedColor.value;
     settings.seedMode = 'custom';
@@ -2002,8 +2045,29 @@
     return '';
   }
 
+  /** 网络背景要不要重新拉：open=每次打开，daily/weekly 按时间，never 只手动 */
+  function shouldRefreshBg() {
+    if (settings.bgMode !== 'url' || !settings.bgUrl) return false;
+    if (!/^https?:/i.test(settings.bgUrl)) return false;
+    if (settings.bgRefresh === 'open') return true;
+    var age = Date.now() - (settings.bgFetchedAt || 0);
+    if (settings.bgRefresh === 'daily') return age > 864e5;
+    if (settings.bgRefresh === 'weekly') return age > 6048e5;
+    return false;
+  }
+
+  function bgBustedUrl(url) {
+    return url + (url.indexOf('?') >= 0 ? '&' : '?') + '_t=' + Date.now();
+  }
+
   function applyBackground() {
     var url = bgSource();
+
+    if (url && settings.bgMode === 'url' && shouldRefreshBg()) {
+      settings.bgFetchedAt = Date.now();
+      saveSettings();
+      url = bgBustedUrl(url);
+    }
     if (!url) {
       bgEl.style.backgroundImage = '';
       bgEl.classList.remove('is-on');
@@ -2097,6 +2161,7 @@
     test.onload = function () {
       settings.bgUrl = u;
       settings.bgMode = 'url';
+      settings.bgFetchedAt = Date.now();
       saveSettings();
       applyBackground();
       syncSettingsUI();
@@ -2104,6 +2169,16 @@
     };
     test.onerror = function () { toast('这张图加载失败'); };
     test.src = u;
+  });
+
+  bgRefreshSel.addEventListener('change', function () {
+    settings.bgRefresh = bgRefreshSel.value;
+    saveSettings();
+    if (settings.bgMode === 'url' && settings.bgRefresh !== 'never') {
+      settings.bgFetchedAt = 0; // 立刻按新策略拉一次
+      applyBackground();
+    }
+    syncSettingsUI();
   });
 
   bgBlur.addEventListener('input', function () {
@@ -2431,7 +2506,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261210c';
+      s.src = '/js/qrcode.js?v=20261211c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
