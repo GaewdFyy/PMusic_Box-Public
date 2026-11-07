@@ -1,0 +1,11 @@
+name = "netease-api"
+main = "src/index.js"
+compatibility_date = "2024-11-01"
+
+[vars]
+# 允许跨域的来源，逗号分隔。站点起来后把音乐站域名加进来
+ALLOWED_ORIGIN = "https://YOUR-SITE.pages.dev"
+
+# 两个 Secret，用命令行设置，不要写在这里：
+#   wrangler secret put MUSIC_U     # 你的网易云 MUSIC_U cookie（VIP 才需要）
+#   wrangler secret put API_TOKEN   # 可选，设了之后所有接口都要带 ?k=

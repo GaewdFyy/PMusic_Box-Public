@@ -1,0 +1,26 @@
+# 依赖与本地状态
+node_modules/
+.wrangler/
+worker/node_modules/
+*.log
+
+# 本地密钥（不要提交）
+.dev.vars
+.dev.vars.*
+!.dev.vars.example
+
+# 本地临时/测试产物
+.test-site/
+.prof/
+.serve*.mjs
+.check*.mjs
+.check*.js
+.shot-*.png
+.patch-*.mjs
+.amll-probe/
+.probe*.mjs
+
+# 编辑器
+.DS_Store
+.vscode/
+.idea/
