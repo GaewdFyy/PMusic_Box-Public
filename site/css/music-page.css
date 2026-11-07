@@ -2441,3 +2441,23 @@ html[data-scheme="light"] .site-bg::after { background: rgba(255, 255, 255, .42)
 }
 
 .toast:not(:popover-open) { display: none; }
+
+
+/* ------------------------------------------------- MD3 波浪形进度条 */
+.wave-host { position: relative; }
+
+.wave-canvas {
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.wave-host .slider.is-wave {
+  position: relative;
+  z-index: 1;
+  background: transparent;
+}
+
+.slider.is-wave::-webkit-slider-runnable-track { background: transparent; }
+.slider.is-wave::-moz-range-track { background: transparent; }
+.slider.is-wave::-moz-range-progress { background: transparent; }

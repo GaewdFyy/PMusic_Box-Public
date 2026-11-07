@@ -197,7 +197,139 @@
   }
 
   function fill(el, ratio) {
-    el.style.setProperty('--fill', (Math.max(0, Math.min(1, ratio)) * 100).toFixed(2) + '%');
+    var r = Math.max(0, Math.min(1, ratio));
+    el.style.setProperty('--fill', (r * 100).toFixed(2) + '%');
+    var item = waveOf(el);
+    if (item) {
+      item.ratio = r;
+      drawWave(item);
+    }
+  }
+
+  /* ------------------------------------------------ MD3 波浪进度条 */
+  var waveItems = [];
+  var waveRaf = 0;
+  var wavePhase = 0;
+  var waveLast = 0;
+
+  function waveOf(el) {
+    for (var i = 0; i < waveItems.length; i += 1) {
+      if (waveItems[i].input === el) return waveItems[i];
+    }
+    return null;
+  }
+
+  function waveColor(el, name, fallback) {
+    var v = getComputedStyle(el).getPropertyValue(name).trim();
+    return v || fallback;
+  }
+
+  function wavePath(ctx, w, h, phase) {
+    var mid = h / 2;
+    var amp = 3;
+    var len = 18;
+    ctx.beginPath();
+    for (var x = 0; x <= w; x += 1) {
+      var y = mid + Math.sin(x / len * Math.PI * 2 + phase) * amp;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+  }
+
+  function drawWave(item) {
+    var ctx = item.ctx;
+    var input = item.input;
+    var w = item.w;
+    var h = item.h;
+    if (!ctx || !w) return;
+
+    ctx.clearRect(0, 0, w, h);
+
+    var active = waveColor(input, '--primary', '#DDC8C1');
+    var idle = waveColor(input, '--outline', '#4F4643');
+
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    // 未播放部分
+    ctx.strokeStyle = idle;
+    wavePath(ctx, w, h, wavePhase);
+    ctx.stroke();
+
+    // 已播放部分（裁剪到 ratio）
+    var px = Math.max(0, Math.min(1, item.ratio || 0)) * w;
+    if (px > 0.5) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(0, 0, px, h);
+      ctx.clip();
+      ctx.strokeStyle = active;
+      wavePath(ctx, w, h, wavePhase);
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
+
+  function layoutWave(item) {
+    var input = item.input;
+    var w = input.offsetWidth;
+    if (!w) return;
+    var h = 14;
+    var dpr = Math.min(2, window.devicePixelRatio || 1);
+    item.w = w;
+    item.h = h;
+    item.canvas.width = Math.round(w * dpr);
+    item.canvas.height = Math.round(h * dpr);
+    item.canvas.style.width = w + 'px';
+    item.canvas.style.height = h + 'px';
+    item.canvas.style.left = input.offsetLeft + 'px';
+    item.canvas.style.top = (input.offsetTop + (input.offsetHeight - h) / 2) + 'px';
+    item.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    drawWave(item);
+  }
+
+  function relayoutWaves() {
+    waveItems.forEach(layoutWave);
+  }
+
+  function waveLoop(ts) {
+    waveRaf = 0;
+    var dt = waveLast ? Math.min(64, ts - waveLast) : 16;
+    waveLast = ts;
+    wavePhase += dt / 1000 * 5;
+    waveItems.forEach(drawWave);
+    if (!audio.paused) waveRaf = requestAnimationFrame(waveLoop);
+    else waveLast = 0;
+  }
+
+  function waveKick() {
+    if (waveRaf || audio.paused) return;
+    waveLast = 0;
+    waveRaf = requestAnimationFrame(waveLoop);
+  }
+
+  function setupWave(input) {
+    if (!input || !input.parentElement) return;
+    input.classList.add('is-wave');
+    input.parentElement.classList.add('wave-host');
+    var canvas = document.createElement('canvas');
+    canvas.className = 'wave-canvas';
+    canvas.setAttribute('aria-hidden', 'true');
+    input.parentElement.appendChild(canvas);
+    var item = { input: input, canvas: canvas, ctx: canvas.getContext('2d'), ratio: 0, w: 0, h: 0 };
+    waveItems.push(item);
+    requestAnimationFrame(function () { layoutWave(item); });
+  }
+
+  setupWave(seek);
+  setupWave(sSeek);
+  window.addEventListener('resize', relayoutWaves);
+
+  // 播放条/大屏显示出来时宽度才从 0 变成实际值，用 ResizeObserver 跟一下
+  if (window.ResizeObserver) {
+    var waveRO = new ResizeObserver(function () { relayoutWaves(); });
+    waveItems.forEach(function (item) { waveRO.observe(item.input); });
   }
 
   var toastEl = null;
@@ -514,7 +646,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261212';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261213';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -1637,11 +1769,13 @@
   audio.addEventListener('play', function () {
     document.body.classList.add('is-audio-playing');
     syncAmllPlayState();
+    waveKick();
   });
 
   audio.addEventListener('pause', function () {
     document.body.classList.remove('is-audio-playing');
     syncAmllPlayState();
+    waveItems.forEach(drawWave);
   });
 
   // 拖动/点歌词跳转后立刻对齐，别等下一帧
@@ -2507,7 +2641,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261212c';
+      s.src = '/js/qrcode.js?v=20261213c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
