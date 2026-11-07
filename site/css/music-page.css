@@ -2461,3 +2461,8 @@ html[data-scheme="light"] .site-bg::after { background: rgba(255, 255, 255, .42)
 .slider.is-wave::-webkit-slider-runnable-track { background: transparent; }
 .slider.is-wave::-moz-range-track { background: transparent; }
 .slider.is-wave::-moz-range-progress { background: transparent; }
+
+
+/* 进度点改用 canvas 画的竖线，原生 thumb 只保留命中区域 */
+.slider.is-wave::-webkit-slider-thumb { opacity: 0; }
+.slider.is-wave::-moz-range-thumb { opacity: 0; }

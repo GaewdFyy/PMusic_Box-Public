@@ -224,16 +224,30 @@
     return v || fallback;
   }
 
-  function wavePath(ctx, w, h, phase) {
+  /**
+   * 振幅包络：已播放段是波形，越靠近进度点振幅越小，在进度点收成 0；
+   * 之后（未播放段）完全平直，所以曲线和直线是连续过渡的。
+   */
+  function waveAmpAt(x, px, amp) {
+    var fade = 26;
+    var d = px - x;
+    if (d <= 0) return 0;
+    if (d >= fade) return amp;
+    var t = d / fade;
+    return amp * (t * t * (3 - 2 * t));
+  }
+
+  function wavePath(ctx, w, h, phase, px, amp) {
     var mid = h / 2;
-    var amp = 2;
     var len = 34;
+    var last = Math.min(w, px);
     ctx.beginPath();
-    for (var x = 0; x <= w; x += 1) {
-      var y = mid + Math.sin(x / len * Math.PI * 2 + phase) * amp;
-      if (x === 0) ctx.moveTo(x, y);
-      else ctx.lineTo(x, y);
+    ctx.moveTo(0, mid);
+    for (var x = 0; x <= last; x += 1) {
+      var y = mid + Math.sin(x / len * Math.PI * 2 + phase) * waveAmpAt(x, px, amp);
+      ctx.lineTo(x, y);
     }
+    ctx.lineTo(last, mid);
   }
 
   function drawWave(item) {
@@ -247,28 +261,36 @@
 
     var active = waveColor(input, '--primary', '#DDC8C1');
     var idle = waveColor(input, '--outline', '#4F4643');
+    var px = Math.max(0, Math.min(1, item.ratio || 0)) * w;
+    var mid = h / 2;
+    var amp = 2 * (item.amp || 0);
 
-    ctx.lineWidth = 3.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
+    ctx.lineWidth = 3.5;
 
-    // 未播放部分
+    // 未播放段：直线
     ctx.strokeStyle = idle;
-    wavePath(ctx, w, h, wavePhase);
+    ctx.beginPath();
+    ctx.moveTo(px, mid);
+    ctx.lineTo(w, mid);
     ctx.stroke();
 
-    // 已播放部分（裁剪到 ratio）
-    var px = Math.max(0, Math.min(1, item.ratio || 0)) * w;
+    // 已播放段：波形，在进度点收敛成直线
     if (px > 0.5) {
-      ctx.save();
-      ctx.beginPath();
-      ctx.rect(0, 0, px, h);
-      ctx.clip();
       ctx.strokeStyle = active;
-      wavePath(ctx, w, h, wavePhase);
+      wavePath(ctx, w, h, wavePhase, px, amp);
       ctx.stroke();
-      ctx.restore();
     }
+
+    // 进度点：一根竖线（替代原来的圆点）
+    var ih = 11;
+    ctx.strokeStyle = active;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(px, mid - ih / 2);
+    ctx.lineTo(px, mid + ih / 2);
+    ctx.stroke();
   }
 
   function layoutWave(item) {
@@ -297,14 +319,28 @@
     waveRaf = 0;
     var dt = waveLast ? Math.min(64, ts - waveLast) : 16;
     waveLast = ts;
-    wavePhase += dt / 1000 * 1.6;
-    waveItems.forEach(drawWave);
-    if (!audio.paused) waveRaf = requestAnimationFrame(waveLoop);
+
+    var playing = !audio.paused;
+    if (playing) wavePhase += dt / 1000 * 1.6;
+
+    var target = playing ? 1 : 0;
+    var moving = false;
+
+    waveItems.forEach(function (item) {
+      var a = item.amp || 0;
+      a += (target - a) * Math.min(1, dt / 110);
+      if (Math.abs(target - a) < 0.004) a = target;
+      item.amp = a;
+      if (a !== target) moving = true;
+      drawWave(item);
+    });
+
+    if (playing || moving) waveRaf = requestAnimationFrame(waveLoop);
     else waveLast = 0;
   }
 
   function waveKick() {
-    if (waveRaf || audio.paused) return;
+    if (waveRaf) return;
     waveLast = 0;
     waveRaf = requestAnimationFrame(waveLoop);
   }
@@ -317,7 +353,7 @@
     canvas.className = 'wave-canvas';
     canvas.setAttribute('aria-hidden', 'true');
     input.parentElement.appendChild(canvas);
-    var item = { input: input, canvas: canvas, ctx: canvas.getContext('2d'), ratio: 0, w: 0, h: 0 };
+    var item = { input: input, canvas: canvas, ctx: canvas.getContext('2d'), ratio: 0, w: 0, h: 0, amp: 0 };
     waveItems.push(item);
     requestAnimationFrame(function () { layoutWave(item); });
   }
@@ -646,7 +682,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261214';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261215';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -1775,7 +1811,7 @@
   audio.addEventListener('pause', function () {
     document.body.classList.remove('is-audio-playing');
     syncAmllPlayState();
-    waveItems.forEach(drawWave);
+    waveKick();
   });
 
   // 拖动/点歌词跳转后立刻对齐，别等下一帧
@@ -2641,7 +2677,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261214c';
+      s.src = '/js/qrcode.js?v=20261215c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
