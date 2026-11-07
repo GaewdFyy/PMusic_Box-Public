@@ -2373,3 +2373,13 @@ body.is-debug .song-id { display: block; }
     opacity: .72 !important;
   }
 }
+/* AMLL 歌词颜色：PC 和移动端统一用主题色（之前桌面是近白色） */
+.amll-wrap .amll-lyric-player { --amll-lp-color: var(--primary); }
+
+/* 大屏歌名 / 艺人的颜色：想换直接改这两个变量 */
+.stage {
+  --stage-title-color: var(--on-surface);
+  --stage-artist-color: var(--on-surface-2);
+}
+.stage .s-title { color: var(--stage-title-color); }
+.stage .s-artist { color: var(--stage-artist-color); }
