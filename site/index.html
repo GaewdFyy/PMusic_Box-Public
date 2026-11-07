@@ -7,7 +7,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>私享音乐盒</title>
 <link rel="icon" href="/favicon.svg">
-<link rel="stylesheet" href="/css/music-page.css?v=20261211">
+<link rel="stylesheet" href="/css/music-page.css?v=20261212">
 <script>
   (function () {
     // 首屏防闪：先按本地设置把深浅色和歌词字号贴上去，主脚本后面还会再对齐一次
@@ -362,15 +362,22 @@
       </div>
 
       <div class="set-row">
-        <span class="set-label">主题配色</span>
+        <span class="set-label">主页取色</span>
         <div class="seed">
-          <button class="chip" id="seed-follow" type="button">封面取色</button>
-          <button class="chip" id="seed-bg" type="button">背景取色</button>
-          <button class="chip" id="seed-split" type="button">主页背景</button>
-          <label class="swatch" title="选一个种子色">
+          <button class="chip" id="seed-page-cover" type="button">封面</button>
+          <button class="chip" id="seed-page-bg" type="button">背景</button>
+          <label class="swatch" title="自定义种子色">
             <input type="color" id="seed-color" value="#8B5643">
             <span aria-hidden="true"></span>
           </label>
+        </div>
+      </div>
+
+      <div class="set-row">
+        <span class="set-label">大屏取色</span>
+        <div class="seed">
+          <button class="chip" id="seed-stage-cover" type="button">封面</button>
+          <button class="chip" id="seed-stage-bg" type="button">背景</button>
         </div>
       </div>
 
@@ -568,7 +575,7 @@
   window.MUSIC_TOKEN = '';
 </script>
 <!-- 改了 css/js 就顺手把 v= 改一下，否则浏览器 / Cloudflare 边缘会继续用旧缓存 -->
-<script src="/js/music-page.js?v=20261211" defer></script>
+<script src="/js/music-page.js?v=20261212" defer></script>
 
 </body>
 </html>

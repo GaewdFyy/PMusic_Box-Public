@@ -514,7 +514,7 @@
   // 留空则完全用本地副本。CDN 挂了会自动回退到本地，不会白屏。
   var AMLL_CDN = '';                 // 例：'https://cdn.example.com/amll/20261203/'
   var AMLL_LOCAL = '/vendor/';       // 仓库里的兜底副本（可以删，但删了就没退路了）
-  var AMLL_VER = '?v=20261211';      // 只对本地副本做缓存穿透
+  var AMLL_VER = '?v=20261212';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
   var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
@@ -1070,19 +1070,21 @@
     return { h: (H + 360) % 360, c: Math.max(0.07, Math.min(0.16, C)) };
   }
 
-  /** 该用哪个色相：自定义种子色 > 背景图 > 封面 */
-  function activeHue() {
-    if (settings.seedMode === 'custom' && settings.seed) return hexToHue(settings.seed);
-    if (settings.seedMode === 'bg' && bgHue) return bgHue;
-    // 主页用背景图、大屏仍用封面（stageHue 单独处理）
-    if (settings.seedMode === 'split' && bgHue) return bgHue;
+  /** 按来源算色相：custom=自选色，bg=背景图，其余=歌曲封面 */
+  function hueFromMode(mode) {
+    if (mode === 'custom' && settings.seed) return hexToHue(settings.seed);
+    if (mode === 'bg' && bgHue) return bgHue;
     return themeHue;
   }
 
-  /** 大屏的色相：split 模式下固定跟随歌曲封面 */
+  /** 主页取色 */
+  function activeHue() {
+    return hueFromMode(settings.seedPage);
+  }
+
+  /** 大屏取色（可以和主页不同） */
   function stageHue() {
-    if (settings.seedMode === 'split') return themeHue;
-    return activeHue();
+    return hueFromMode(settings.seedStage);
   }
 
   function paintTheme() {
@@ -1843,7 +1845,7 @@
 
   function loadSettings() {
     var out = {
-      scheme: 'auto', seed: '', seedMode: 'cover',
+      scheme: 'auto', seed: '', seedPage: 'cover', seedStage: 'cover',
       bgMode: 'none', bgData: '', bgUrl: '', bgBlur: 10, bgRefresh: 'open', bgFetchedAt: 0,
       lyricScale: 1, trans: true, amll: true, bold: false, debug: false, offset: 0
     };
@@ -1853,10 +1855,15 @@
         var o = JSON.parse(raw) || {};
         if (o.scheme === 'auto' || o.scheme === 'light' || o.scheme === 'dark') out.scheme = o.scheme;
         if (typeof o.seed === 'string' && /^#[0-9a-f]{6}$/i.test(o.seed)) out.seed = o.seed;
-        if (o.seedMode === 'cover' || o.seedMode === 'bg' || o.seedMode === 'custom' || o.seedMode === 'split') {
-          out.seedMode = o.seedMode;
-        }
-        else if (out.seed) out.seedMode = 'custom';
+        // 旧版本只有 seedMode：split = 主页背景 + 大屏封面
+        var legacy = o.seedMode;
+        if (o.seedPage === 'cover' || o.seedPage === 'bg' || o.seedPage === 'custom') out.seedPage = o.seedPage;
+        else if (legacy === 'bg' || legacy === 'split') out.seedPage = 'bg';
+        else if (legacy === 'custom' || out.seed) out.seedPage = 'custom';
+
+        if (o.seedStage === 'cover' || o.seedStage === 'bg') out.seedStage = o.seedStage;
+        else if (legacy === 'bg') out.seedStage = 'bg';
+        else if (legacy === 'custom' || out.seed) out.seedStage = 'custom';
         if (o.bgMode === 'none' || o.bgMode === 'local' || o.bgMode === 'url') out.bgMode = o.bgMode;
         if (typeof o.bgData === 'string' && /^data:image\//.test(o.bgData)) out.bgData = o.bgData;
         if (typeof o.bgUrl === 'string' && /^https?:\/\//.test(o.bgUrl)) out.bgUrl = o.bgUrl;
@@ -1907,9 +1914,10 @@
 
   var settingsDlg = $('settings');
   var segScheme = $('seg-scheme');
-  var seedFollow = $('seed-follow');
-  var seedBg = $('seed-bg');
-  var seedSplit = $('seed-split');
+  var seedPageCover = $('seed-page-cover');
+  var seedPageBg = $('seed-page-bg');
+  var seedStageCover = $('seed-stage-cover');
+  var seedStageBg = $('seed-stage-bg');
   var seedColor = $('seed-color');
   var segBg = $('seg-bg');
   var bgLocalRow = $('bg-local-row');
@@ -1939,11 +1947,13 @@
       btns[i].setAttribute('aria-checked', btns[i].getAttribute('data-v') === settings.scheme ? 'true' : 'false');
     }
 
-    seedFollow.setAttribute('aria-pressed', settings.seedMode === 'cover' ? 'true' : 'false');
-    seedBg.setAttribute('aria-pressed', settings.seedMode === 'bg' ? 'true' : 'false');
-    seedSplit.setAttribute('aria-pressed', settings.seedMode === 'split' ? 'true' : 'false');
-    seedBg.disabled = !bgSource();
-    seedSplit.disabled = !bgSource();
+    var hasBg = !!bgSource();
+    seedPageCover.setAttribute('aria-pressed', settings.seedPage === 'cover' ? 'true' : 'false');
+    seedPageBg.setAttribute('aria-pressed', settings.seedPage === 'bg' ? 'true' : 'false');
+    seedStageCover.setAttribute('aria-pressed', settings.seedStage === 'cover' ? 'true' : 'false');
+    seedStageBg.setAttribute('aria-pressed', settings.seedStage === 'bg' ? 'true' : 'false');
+    seedPageBg.disabled = !hasBg;
+    seedStageBg.disabled = !hasBg;
 
     var bgBtns = segBg.querySelectorAll('button');
     for (var j = 0; j < bgBtns.length; j += 1) {
@@ -1961,7 +1971,7 @@
 
     // 色板预览：自定义色就显示它，否则按当前取色来源算一个
     var hue = activeHue();
-    var preview = settings.seedMode === 'custom' && settings.seed
+    var preview = settings.seedPage === 'custom' && settings.seed
       ? settings.seed
       : (hue ? oklchToHex(toneL(55), hue.c, hue.h) : '#8B5643');
     document.documentElement.style.setProperty('--seed-preview', preview);
@@ -2000,39 +2010,30 @@
     syncSettingsUI();
   });
 
-  seedFollow.addEventListener('click', function () {
-    settings.seedMode = 'cover';
+  function pickSeed(scope, mode) {
+    if (mode === 'bg' && !bgSource()) {
+      toast('先选一张背景图');
+      return;
+    }
+    if (scope === 'page') settings.seedPage = mode;
+    else settings.seedStage = mode;
+    saveSettings();
+    paintTheme();
+    syncSettingsUI();
+  }
+
+  seedPageCover.addEventListener('click', function () {
     settings.seed = '';
-    saveSettings();
-    paintTheme();
-    syncSettingsUI();
+    pickSeed('page', 'cover');
   });
 
-  seedBg.addEventListener('click', function () {
-    if (!bgSource()) {
-      toast('先选一张背景图');
-      return;
-    }
-    settings.seedMode = 'bg';
-    saveSettings();
-    paintTheme();
-    syncSettingsUI();
-  });
-
-  seedSplit.addEventListener('click', function () {
-    if (!bgSource()) {
-      toast('先选一张背景图');
-      return;
-    }
-    settings.seedMode = 'split';
-    saveSettings();
-    paintTheme();
-    syncSettingsUI();
-  });
+  seedPageBg.addEventListener('click', function () { pickSeed('page', 'bg'); });
+  seedStageCover.addEventListener('click', function () { pickSeed('stage', 'cover'); });
+  seedStageBg.addEventListener('click', function () { pickSeed('stage', 'bg'); });
 
   seedColor.addEventListener('input', function () {
     settings.seed = seedColor.value;
-    settings.seedMode = 'custom';
+    settings.seedPage = 'custom';
     saveSettings();
     paintTheme();
     syncSettingsUI();
@@ -2072,7 +2073,7 @@
       bgEl.style.backgroundImage = '';
       bgEl.classList.remove('is-on');
       bgHue = null;
-      if (settings.seedMode === 'bg') paintTheme();
+      paintTheme();
       return;
     }
     bgEl.style.backgroundImage = 'url("' + url.replace(/"/g, '%22') + '")';
@@ -2092,12 +2093,12 @@
       } catch (e) {
         bgHue = null;
       }
-      if (settings.seedMode === 'bg') paintTheme();
+      paintTheme();
       syncSettingsUI();
     };
     img.onerror = function () {
       bgHue = null;
-      if (settings.seedMode === 'bg') paintTheme();
+      paintTheme();
     };
     img.src = url;
   }
@@ -2506,7 +2507,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261211c';
+      s.src = '/js/qrcode.js?v=20261212c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
