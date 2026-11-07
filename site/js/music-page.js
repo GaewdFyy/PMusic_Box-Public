@@ -542,18 +542,26 @@
     amll.status = 1;
 
     function done(ok) {
+      if (amll.status === 2 || amll.status === 3) return; // 只结算一次
       amll.status = ok ? 2 : 3;
+      clearTimeout(guard);
       amll.waiters.splice(0).forEach(function (fn) { fn(ok); });
     }
+
+    // 组件 392KB，移动网络下可能很慢：6 秒还不就绪就放弃，先用轻量歌词顶着
+    var guard = setTimeout(function () { done(false); }, 6000);
 
     var first = AMLL_CDN ? loadAmllFrom(AMLL_CDN, false) : Promise.resolve(false);
 
     first
       .then(function (ok) {
-        if (ok) return true;
-        return loadAmllFrom(AMLL_LOCAL, true);
+        if (ok) {
+          done(true);
+          return;
+        }
+        return loadAmllFrom(AMLL_LOCAL, true).then(done);
       })
-      .then(done);
+      .catch(function () { done(false); });
 
     return p;
   }
@@ -744,6 +752,13 @@
       stopAmll();
       renderLyrics(parseLrc(data.lrc || ''), parseLrcMap(data.tlyric || ''));
       return;
+    }
+
+    // AMLL 还没就绪（首次打开、网络慢）时先把轻量歌词渲染出来，
+    // 否则用户会一直盯着「歌词加载中…」，等 392KB 的组件下载完才看到字。
+    if (amll.status !== 2) {
+      showAmll(false);
+      renderLyrics(parseLrc(data.lrc || ''), parseLrcMap(data.tlyric || ''));
     }
 
     loadAmll().then(function (ok) {
