@@ -70,8 +70,7 @@ node worker/dev-server.mjs
 npx serve site -l 8080
 ```
 
-浏览器打开 <http://localhost:8080>，页面默认请求 `https://YOUR-WORKER.workers.dev`（已改为占位符
-`https://YOUR-WORKER.workers.dev`），本地调试时把它改成 `http://127.0.0.1:8787`：
+浏览器打开 <http://localhost:8080>，页面默认请求占位符 `https://YOUR-WORKER.workers.dev`，本地调试时把它改成 `http://127.0.0.1:8787`：
 
 ```html
 <!-- site/index.html 末尾 -->
