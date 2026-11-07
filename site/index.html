@@ -33,6 +33,8 @@
 </head>
 <body>
 
+<div class="site-bg" id="site-bg" aria-hidden="true"></div>
+
 <div class="app" id="app">
 
   <header class="topbar">
@@ -363,12 +365,47 @@
         <span class="set-label">主题配色</span>
         <div class="seed">
           <button class="chip" id="seed-follow" type="button">封面取色</button>
+          <button class="chip" id="seed-bg" type="button">背景取色</button>
           <label class="swatch" title="选一个种子色">
             <input type="color" id="seed-color" value="#8B5643">
             <span aria-hidden="true"></span>
           </label>
         </div>
       </div>
+
+      <div class="set-row">
+        <span class="set-label">网站背景</span>
+        <div class="seg" id="seg-bg" role="radiogroup" aria-label="网站背景">
+          <button type="button" data-v="none" role="radio">无</button>
+          <button type="button" data-v="local" role="radio">本地</button>
+          <button type="button" data-v="url" role="radio">网络</button>
+        </div>
+      </div>
+
+      <div class="set-row" id="bg-local-row" hidden>
+        <span class="set-label">本地图片</span>
+        <div class="seed">
+          <button class="chip" id="bg-pick" type="button">选择文件</button>
+          <input id="bg-file" type="file" accept="image/*" hidden>
+        </div>
+      </div>
+
+      <div class="set-row" id="bg-url-row" hidden>
+        <span class="set-label">图片地址</span>
+        <div class="bg-url">
+          <input class="text-input" id="bg-link" type="url" placeholder="https://…" spellcheck="false">
+          <button class="chip" id="bg-apply" type="button">获取</button>
+        </div>
+      </div>
+
+      <div class="set-row" id="bg-blur-row" hidden>
+        <label class="set-label" for="bg-blur">模糊度</label>
+        <div class="size">
+          <input class="slider" id="bg-blur" type="range" min="0" max="40" step="2" value="10">
+          <output class="size-val" id="bg-blur-val">10px</output>
+        </div>
+      </div>
+      <p class="set-note" id="bg-note" hidden>背景图铺在页面最底层；主题配色可以选「背景取色」。</p>
     </section>
 
     <section class="group">
