@@ -164,6 +164,26 @@ button { font-family: inherit; }
 .icon-btn:hover { background: var(--surface-2); color: var(--on-surface); }
 .icon-btn:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
 
+/* 图标 + 文字的胶囊按钮（目前只有顶栏的「设置」） */
+.icon-btn.with-label {
+  width: auto;
+  gap: .3rem;
+  padding: 0 .85rem 0 .62rem;
+}
+
+.icon-btn.with-label .btn-label {
+  font-size: .82rem;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+/* 屏幕太窄时只留图标，别把顶栏挤乱 */
+@media (max-width: 360px) {
+  .icon-btn.with-label { width: 38px; padding: 0; }
+  .icon-btn.with-label .btn-label { display: none; }
+}
+
 .main {
   grid-column: 2;
   grid-row: 2;
@@ -966,6 +986,18 @@ html[data-scheme="dark"] .s-cover { box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
   overflow: hidden;
 }
 
+/* 设置面板比其它弹窗宽一档：里面是「标签 + 控件」两列，太窄会显得挤 */
+#settings {
+  width: min(560px, 94vw);
+  max-width: 560px;
+}
+
+/* 说明弹窗是整段文字，再宽一点更好读 */
+#dlg-about {
+  width: min(600px, 94vw);
+  max-width: 600px;
+}
+
 .sheet::backdrop {
   background: color-mix(in srgb, var(--surface) 52%, transparent);
   -webkit-backdrop-filter: blur(10px);
@@ -999,6 +1031,80 @@ html[data-scheme="dark"] .s-cover { box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
 }
 
 .group { display: flex; flex-direction: column; gap: .35rem; }
+
+/* ---------------------------------------------------------------- 说明弹窗 */
+.about-body {
+  gap: .95rem;
+  max-height: min(72vh, 620px);
+  padding-bottom: 1.15rem;
+}
+
+.about-lead {
+  margin: 0;
+  padding: .7rem .85rem;
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 80%, transparent);
+  color: var(--on-surface);
+  font-size: .8rem;
+  line-height: 1.8;
+}
+
+.about-sec { display: flex; flex-direction: column; gap: .45rem; }
+
+.about-sec h3 {
+  margin: 0;
+  color: var(--on-surface);
+  font-size: .82rem;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.about-sec p {
+  margin: 0;
+  color: var(--on-surface-2);
+  font-size: .78rem;
+  line-height: 1.85;
+}
+
+.about-sec code {
+  padding: .05em .34em;
+  border-radius: 5px;
+  background: color-mix(in srgb, var(--outline) 16%, transparent);
+  color: var(--on-surface);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: .92em;
+}
+
+.about-sec a {
+  color: var(--primary);
+  text-decoration: none;
+  border-bottom: 1px solid color-mix(in srgb, var(--primary) 45%, transparent);
+}
+
+.about-sec a:hover { color: var(--on-surface); }
+
+.about-list {
+  display: flex;
+  gap: .4rem;
+  flex-direction: column;
+  margin: 0;
+  padding-left: 1.05rem;
+  color: var(--on-surface-2);
+  font-size: .78rem;
+  line-height: 1.75;
+}
+
+.about-list li::marker { color: color-mix(in srgb, var(--primary) 65%, transparent); }
+
+.about-foot {
+  margin: 0;
+  padding-top: .6rem;
+  border-top: 1px solid color-mix(in srgb, var(--outline) 26%, transparent);
+  color: var(--on-surface-2);
+  font-size: .69rem;
+  line-height: 1.7;
+  opacity: .82;
+}
 
 .group h3 {
   margin: 0 0 .1rem;
@@ -1623,13 +1729,76 @@ html[data-scheme="dark"] .s-cover { box-shadow: 0 24px 60px rgba(0, 0, 0, .5); }
   letter-spacing: .02em;
 }
 
+/* 侧边栏底部：实现说明。margin-top:auto 把这块和下面的账号块一起压到底 */
+/* 长得像卡片的按钮：点开是说明弹窗 */
+.side-about {
+  display: flex;
+  gap: .22rem;
+  flex-direction: column;
+  margin-top: auto;
+  padding: .7rem .75rem;
+  border: 1px solid color-mix(in srgb, var(--outline) 24%, transparent);
+  border-radius: 14px;
+  background: color-mix(in srgb, var(--surface-2) 66%, transparent);
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+  transition: background .18s ease, border-color .18s ease;
+}
+
+.side-about:hover {
+  border-color: color-mix(in srgb, var(--primary) 42%, transparent);
+  background: color-mix(in srgb, var(--surface-2) 92%, transparent);
+}
+
+.side-about:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+
+.side-about-top { display: flex; gap: .3rem; align-items: center; }
+
+.side-about-glyph {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  fill: var(--primary);
+}
+
+.side-about-title {
+  overflow: hidden;
+  flex: 1;
+  color: var(--on-surface-2);
+  font-size: .68rem;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.side-about-arrow {
+  flex: none;
+  width: 15px;
+  height: 15px;
+  fill: var(--on-surface-2);
+  opacity: .5;
+  transition: transform .18s ease, opacity .18s ease;
+}
+
+.side-about:hover .side-about-arrow { opacity: 1; transform: translateX(2px); }
+
+.side-about-sub {
+  color: var(--on-surface-2);
+  font-size: .7rem;
+  line-height: 1.6;
+  opacity: .85;
+}
+
 /* 侧边栏底部的账号块 */
 .side-user {
   display: flex;
   gap: .4rem;
   align-items: center;
   justify-content: space-between;
-  margin-top: auto;
+  margin-top: .55rem;
   padding: .55rem .55rem 0;
   border-top: 1px solid color-mix(in srgb, var(--outline) 26%, transparent);
 }

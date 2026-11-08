@@ -47,14 +47,107 @@ function passEnabled(env) {
   return !(v === 'false' || v === '0' || v === 'off' || v === 'no');
 }
 
+// ---------------------------------------------------------------- 登录限流
+// 防脚本化暴力破解：同一出口 IP 在 10 分钟内失败满 5 次就先拦住，到期自动放开。
+// 计数放两处：
+//   1) 模块内存：同步、快，能挡住连着打同一个 isolate 的尝试（冷启动后归零）
+//   2) KV（绑了 ACCOUNTS 才有）：跨 isolate / 跨机房共享，但弱一致，只当增强
+// 刻意不按账号名计数——否则任何人都能靠故意输错把某个账号锁死。
+const LOGIN_MAX_FAILS = 5;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000;
+
+const loginFails = new Map(); // ip -> { n, resetAt }
+
+function liveLoginFail(ip) {
+  const e = loginFails.get(ip);
+  if (!e) return null;
+  if (e.resetAt <= Date.now()) {
+    loginFails.delete(ip);
+    return null;
+  }
+  return e;
+}
+
+/** 还要等多少秒才能再试；0 = 没被拦 */
+function loginBlockedSeconds(ip) {
+  const e = liveLoginFail(ip);
+  if (!e || e.n < LOGIN_MAX_FAILS) return 0;
+  return Math.max(1, Math.ceil((e.resetAt - Date.now()) / 1000));
+}
+
+/** 记一次失败，返回这一步之后的累计次数 */
+function noteLoginFail(ip) {
+  const now = Date.now();
+  const e = liveLoginFail(ip) || { n: 0, resetAt: now + LOGIN_WINDOW_MS };
+  e.n += 1;
+  loginFails.set(ip, e);
+
+  // 别让 Map 无限长：超过 500 条就把过期的清掉
+  if (loginFails.size > 500) {
+    loginFails.forEach((v, k) => {
+      if (v.resetAt <= now) loginFails.delete(k);
+    });
+  }
+  return e.n;
+}
+
+function clearLoginFail(ip) {
+  loginFails.delete(ip);
+}
+
+const loginFailKey = (ip) => `rl:login:${ip}`;
+
+/** KV 里的失败记录（可能没绑 KV，一律容错） */
+async function kvLoginFail(ip, env) {
+  const kv = env && env.ACCOUNTS;
+  if (!kv || typeof kv.get !== 'function') return null;
+  try {
+    const raw = await kv.get(loginFailKey(ip));
+    const e = raw ? JSON.parse(raw) : null;
+    return e && e.resetAt > Date.now() ? e : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+async function kvNoteLoginFail(ip, env) {
+  const kv = env && env.ACCOUNTS;
+  if (!kv || typeof kv.put !== 'function') return;
+  try {
+    const now = Date.now();
+    const old = await kvLoginFail(ip, env);
+    const e = old ? { n: Number(old.n) || 0, resetAt: old.resetAt } : { n: 0, resetAt: now + LOGIN_WINDOW_MS };
+    e.n += 1;
+    // 同一个 key 每秒只能写一次，写失败（429/限流）直接放弃，内存那层还在
+    await kv.put(loginFailKey(ip), JSON.stringify(e), { expirationTtl: Math.ceil(LOGIN_WINDOW_MS / 1000) });
+  } catch (e) {}
+}
+
+async function kvClearLoginFail(ip, env) {
+  const kv = env && env.ACCOUNTS;
+  if (!kv || typeof kv.delete !== 'function') return;
+  try {
+    await kv.delete(loginFailKey(ip));
+  } catch (e) {}
+}
+
+/** 取客户端 IP：Workers 上 cf-connecting-ip 一定有；本地 dev 退化成固定桶 */
+function clientIp(request) {
+  return (
+    request.headers.get('cf-connecting-ip') ||
+    (request.headers.get('x-forwarded-for') || '').split(',')[0].trim() ||
+    'local'
+  );
+}
+
 // 账号表（二选一，都有就优先 KV）：
 //   1) KV 绑定 ACCOUNTS：key = 账号名，value = {"password":"..."} 或 {"passwordHash":"<sha256 hex>"}
 //   2) Secret ACCOUNTS_JSON：JSON 数组 [{"name":"...","password":"...","musicU":"..."}]
 // 每个账号可选 musicU 字段（网易云 MUSIC_U），登录后该账号的请求就用它。
 const SESSION_DAYS = 30;
 
-// 开箱就能登的账号：第一次部署时先给一个，进去之后建议改用 Secret/KV，
-// 再把这里删掉（否则密码会留在代码里）。
+// 开箱就能登的账号：公开版本留空，请用上面的 KV / ACCOUNTS_JSON 配置，
+// 不要把密码写进仓库（否则会留在 Git 历史里）。
 const BUILTIN_ACCOUNTS = [];
 
 // ---------------------------------------------------------------- weapi 加密
@@ -460,8 +553,12 @@ function cacheKey(url) {
   return new Request(u.toString(), { method: 'GET' });
 }
 
-/** 读缓存 → 没有就算 → 写缓存。缓存坏掉不能影响主流程 */
-async function withCache(url, ttl, produce) {
+/**
+ * 读缓存 → 没有就算 → 写缓存。缓存坏掉不能影响主流程
+ * shouldCache：可选。返回 false 就不写缓存，避免把一次失败的空结果钉住整个 TTL。
+ * 不传时行为与以前完全一致。
+ */
+async function withCache(url, ttl, produce, shouldCache) {
   const cache = typeof caches !== 'undefined' ? caches.default : null;
   const key = cacheKey(url);
 
@@ -474,7 +571,7 @@ async function withCache(url, ttl, produce) {
 
   const data = await produce();
 
-  if (cache) {
+  if (cache && (!shouldCache || shouldCache(data))) {
     try {
       await cache.put(
         key,
@@ -827,11 +924,40 @@ export default {
           return json({ error: '账号名和密码都要填' }, 400, request, env);
         }
 
+        // 限流：先看内存（快），没被拦再问一次 KV（跨 isolate，弱一致）
+        const ip = clientIp(request);
+        let wait = loginBlockedSeconds(ip);
+        if (!wait) {
+          const kv = await kvLoginFail(ip, env);
+          if (kv && Number(kv.n) >= LOGIN_MAX_FAILS) {
+            wait = Math.max(1, Math.ceil((kv.resetAt - Date.now()) / 1000));
+          }
+        }
+        if (wait) {
+          const later = wait < 60 ? `${wait} 秒` : `${Math.ceil(wait / 60)} 分钟`;
+          const res = json(
+            { error: `密码错误次数过多，请 ${later}后再试`, retryAfter: wait },
+            429,
+            request,
+            env
+          );
+          res.headers.set('retry-after', String(wait));
+          return res;
+        }
+
         // 简单拖一下时间，别让人拿脚本高速猜
         await new Promise((r) => setTimeout(r, 250));
 
         const acc = await verifyLogin(name, password, env);
-        if (!acc) return json({ error: '账号或密码不对' }, 401, request, env);
+        if (!acc) {
+          noteLoginFail(ip);
+          await kvNoteLoginFail(ip, env);
+          return json({ error: '账号或密码不对' }, 401, request, env);
+        }
+
+        // 登录成功就把这张 IP 的失败计数清掉
+        clearLoginFail(ip);
+        await kvClearLoginFail(ip, env);
 
         const t = await makeToken(name, env);
         return json(
@@ -878,10 +1004,18 @@ export default {
         return json(await search(q, limit, ctx), 200, request, env);
       }
 
+      // 歌词按歌曲 ID 缓存 1 小时：同一首歌的歌词基本不会变，重复请求没必要再打上游。
+      // 只有真拿到歌词才写缓存，避免一次空结果被钉住一小时（此时下次请求会重新取）。
       if (url.pathname === '/api/lyric') {
         const id = url.searchParams.get('id');
         if (!id) return json({ error: '缺少 id 参数' }, 400, request, env);
-        return json(await lyric(id, ctx), 200, request, env);
+        const r = await withCache(
+          request.url,
+          3600,
+          () => lyric(id, ctx),
+          (d) => Boolean(d && (d.lrc || d.yrc || d.klyric))
+        );
+        return json(r.data, 200, request, env);
       }
 
       if (url.pathname === '/api/url') {

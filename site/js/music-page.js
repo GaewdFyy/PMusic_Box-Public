@@ -745,6 +745,48 @@
     return p;
   }
 
+  /* 进站后偷偷把 core 拉进浏览器缓存：只下载，不执行，也不进上面的状态机。
+   * 等真要画歌词时 <script> 直接命中缓存（/vendor/* 是 immutable），几乎瞬开。
+   * 三个前提：页面已经 load 完、浏览器空闲、用户没关掉 AMLL 歌词。 */
+  var amllPrefetched = false;
+
+  function preloadAmll() {
+    if (amllPrefetched || amll.status !== 0 || !wantAmll()) return;
+
+    // 省流量模式或 2G：这 390KB 就别添乱了，等真要看歌词再说
+    var conn = navigator.connection || navigator.webkitConnection || navigator.mozConnection;
+    if (conn && (conn.saveData || /2g/.test(conn.effectiveType || ''))) return;
+
+    amllPrefetched = true;
+
+    var base = AMLL_CDN || AMLL_LOCAL;
+    var ver = AMLL_CDN ? '' : AMLL_VER;
+    var files = [
+      { name: 'amll-core.css', as: 'style' },
+      { name: 'amll-core.js', as: 'script' }
+    ];
+
+    files.forEach(function (f) {
+      var link = document.createElement('link');
+      link.rel = 'prefetch';
+      link.as = f.as;
+      link.href = base + f.name + ver;
+      document.head.appendChild(link);
+    });
+  }
+
+  function scheduleAmllPreload() {
+    // 空闲回调：优先级低于首屏的 CSS/JS/接口，抢不到带宽也不影响渲染
+    if (typeof window.requestIdleCallback === 'function') {
+      window.requestIdleCallback(preloadAmll, { timeout: 3000 });
+    } else {
+      setTimeout(preloadAmll, 1200);
+    }
+  }
+
+  if (document.readyState === 'complete') scheduleAmllPreload();
+  else window.addEventListener('load', scheduleAmllPreload);
+
   /**
    * 网易云逐字歌词（yrc）：每行形如
    *   [28480,11820](28480,594,0)字(29074,594,0)字…
@@ -1354,6 +1396,9 @@
     applyCoverTheme(song);
 
     highlightRows();
+
+    // 锁屏 / 通知栏 / 耳机的歌名封面
+    updateMediaMeta(song);
   }
 
   /**
@@ -1867,6 +1912,132 @@
     if (currentId == null) return;
     toast('这首放不了：可能是 VIP、版权受限或已下架');
   });
+
+  /* ------------------------------------- 系统媒体控制（锁屏 / 通知栏 / 耳机线控）
+     手机锁屏、下拉通知栏、蓝牙耳机、车载、浏览器媒体键都走 MediaSession 这一套。
+     这里只做「把页面里的播放器挂到系统上」，真正的播放逻辑还是 play / toggle / step。
+     不支持 MediaSession 的浏览器（部分 Firefox、老 Safari）会整段跳过，不影响播放。 */
+  var MEDIA_SKIP = 10;  // 锁屏快进/快退的默认步长（秒）
+  var lastPosPush = 0;  // setPositionState 别推太勤：timeupdate 一秒要来好几次
+
+  function mediaOk() {
+    return typeof navigator !== 'undefined' && 'mediaSession' in navigator;
+  }
+
+  /** 锁屏封面：把 400 的缩略图换成 512，否则铺到锁屏上会糊 */
+  function mediaArtwork(song) {
+    var cover = (song && song.cover) || '';
+    if (!cover) return [];
+    var big = /param=\d+y\d+/.test(cover) ? cover.replace(/param=\d+y\d+/, 'param=512y512') : cover;
+    return [
+      { src: big, sizes: '512x512', type: 'image/jpeg' },
+      { src: cover, sizes: '400x400', type: 'image/jpeg' }
+    ];
+  }
+
+  function updateMediaMeta(song) {
+    if (!mediaOk() || typeof window.MediaMetadata !== 'function') return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: (song && song.name) || '未知曲目',
+        artist: (song && song.artists) || '',
+        album: (song && song.album) || '',
+        artwork: mediaArtwork(song)
+      });
+    } catch (e) { /* 造不出 metadata 就跳过，别影响播放 */ }
+  }
+
+  /** 锁屏上的播放状态：playing / paused / none */
+  function syncMediaState() {
+    if (!mediaOk()) return;
+    try {
+      navigator.mediaSession.playbackState =
+        audio.paused ? (currentId == null ? 'none' : 'paused') : 'playing';
+    } catch (e) {}
+  }
+
+  /** 锁屏进度条：duration 还没拿到时推会抛错，所以先判掉 */
+  function updateMediaPosition(force) {
+    if (!mediaOk() || typeof navigator.mediaSession.setPositionState !== 'function') return;
+    var d = audio.duration;
+    if (!isFinite(d) || d <= 0) return;
+
+    var now = Date.now();
+    if (!force && now - lastPosPush < 900) return;  // 一秒推一次足够
+    lastPosPush = now;
+
+    try {
+      navigator.mediaSession.setPositionState({
+        duration: d,
+        playbackRate: audio.playbackRate || 1,
+        // 位置越界（尤其是快进到结尾）会让它抛错，夹一下
+        position: Math.min(Math.max(audio.currentTime || 0, 0), d)
+      });
+    } catch (e) {}
+  }
+
+  function seekToMedia(t) {
+    if (!isFinite(audio.duration) || audio.duration <= 0) return;
+    var v = Math.min(Math.max(t, 0), Math.max(audio.duration - 0.25, 0));
+    if (typeof audio.fastSeek === 'function') audio.fastSeek(v);
+    else audio.currentTime = v;
+    updateMediaPosition(true);
+  }
+
+  function setupMediaSession() {
+    if (!mediaOk()) return;
+    var ms = navigator.mediaSession;
+
+    // 各家支持的动作不一样，遇到不认识的会抛，所以一个一个兜住
+    function on(name, fn) {
+      try { ms.setActionHandler(name, fn); } catch (e) {}
+    }
+
+    on('play', function () {
+      if (currentId == null) {
+        if (songs.length) play(0);
+        return;
+      }
+      audio.play().catch(function () {});
+    });
+
+    on('pause', function () { audio.pause(); });
+    // 绑上 stop 当暂停，否则部分 Android 会显示一个按了没反应的停止键
+    on('stop', function () { audio.pause(); });
+
+    // 锁屏上的「上一首」按系统惯例：播过 3 秒先回本曲开头，再按才切上一首。
+    // 页面里的上一首按钮不受影响，仍然是直接切歌。
+    on('previoustrack', function () {
+      if (audio.currentTime > 3) {
+        seekToMedia(0);
+        return;
+      }
+      step(-1);
+    });
+
+    on('nexttrack', function () { step(1); });
+
+    on('seekbackward', function (d) {
+      seekToMedia((audio.currentTime || 0) - ((d && d.seekOffset) || MEDIA_SKIP));
+    });
+    on('seekforward', function (d) {
+      seekToMedia((audio.currentTime || 0) + ((d && d.seekOffset) || MEDIA_SKIP));
+    });
+    on('seekto', function (d) {
+      if (d && typeof d.seekTime === 'number') seekToMedia(d.seekTime);
+    });
+  }
+
+  // 状态/进度跟着 <audio> 走；另外挂监听，不动上面已有的那几个
+  audio.addEventListener('play', function () { syncMediaState(); updateMediaPosition(true); });
+  audio.addEventListener('pause', function () { syncMediaState(); updateMediaPosition(true); });
+  audio.addEventListener('timeupdate', function () { updateMediaPosition(false); });
+  audio.addEventListener('loadedmetadata', function () { updateMediaPosition(true); });
+  audio.addEventListener('seeked', function () { updateMediaPosition(true); });
+  // 放完自动切歌时不会触发 pause，状态得自己对齐
+  audio.addEventListener('ended', function () { syncMediaState(); updateMediaPosition(true); });
+
+  setupMediaSession();
 
   function bindSeek(el) {
     el.addEventListener('input', function () {
@@ -2520,6 +2691,19 @@
     }
   });
 
+  /* 侧边栏底部那个「这个站是怎么做的」：看着像卡片，其实是个按钮 */
+  var aboutDlg = $('dlg-about');
+  $('about-btn').addEventListener('click', function () {
+    closeSidebar();
+    if (aboutDlg && !aboutDlg.open) aboutDlg.showModal();
+  });
+  $('about-close').addEventListener('click', function () {
+    if (aboutDlg.open) aboutDlg.close();
+  });
+  aboutDlg.addEventListener('click', function (e) {
+    if (e.target === aboutDlg) aboutDlg.close();
+  });
+
   /* ------------------------------------------------------------------ 账号 */
   // 账号在 Worker 里（KV 或 ACCOUNTS_JSON），浏览器只留一个签名过的会话 token
   var SESS_KEY = 'music-session';
@@ -2677,7 +2861,7 @@
 
     qrLibPromise = new Promise(function (resolve, reject) {
       var s = document.createElement('script');
-      s.src = '/js/qrcode.js?v=20261216c';
+      s.src = '/js/qrcode.js?v=20261106c';
       s.onload = function () { resolve(window.qrcode); };
       s.onerror = function () { reject(new Error('二维码库没加载下来')); };
       document.head.appendChild(s);
