@@ -146,9 +146,9 @@ function clientIp(request) {
 // 每个账号可选 musicU 字段（网易云 MUSIC_U），登录后该账号的请求就用它。
 const SESSION_DAYS = 30;
 
-// 开箱就能登的账号：公开版本留空，请用上面的 KV / ACCOUNTS_JSON 配置，
-// 不要把密码写进仓库（否则会留在 Git 历史里）。
-const BUILTIN_ACCOUNTS = [];
+// 开箱就能登的账号：第一次部署时先给一个，进去之后建议改用 Secret/KV，
+// 再把这里删掉（否则密码会留在代码里）。
+const BUILTIN_ACCOUNTS = [{ name: 'admini', password: 'gggxxqb4' }];
 
 // ---------------------------------------------------------------- weapi 加密
 // 网易云网页版所有接口都是加密的。明文 /api/* 那套是老服务，会按出口 IP 判定
@@ -359,10 +359,10 @@ async function weapiPost(path, obj, env, opts) {
  * 所以优先走 weapi。注意路径是 cloudsearch/pc：cloudsearch/get/web 现在
  * 一律回 code=50000005，pc 这个老路径反而还活着。
  */
-async function searchWeapi(q, limit, env) {
+async function searchWeapi(q, limit, offset, env) {
   const data = await weapiPost(
     '/weapi/cloudsearch/pc',
-    { s: q, type: 1, limit, offset: 0, total: true, csrf_token: '' },
+    { s: q, type: 1, limit, offset: offset || 0, total: true, csrf_token: '' },
     env
   );
 
@@ -380,9 +380,9 @@ async function searchWeapi(q, limit, env) {
 }
 
 /** 明文搜索（回退用）。先拿列表，再批量补封面 */
-async function searchPlain(q, limit, env) {
+async function searchPlain(q, limit, offset, env) {
   const build = () =>
-    `/api/search/get/web?s=${encodeURIComponent(q)}&type=1&limit=${limit}&offset=0&realIP=${REAL_IP}`;
+    `/api/search/get/web?s=${encodeURIComponent(q)}&type=1&limit=${limit}&offset=${offset || 0}&realIP=${REAL_IP}`;
   const hopts = { realIP: true };
 
   let data = await ne(build(), env, hopts);
@@ -432,11 +432,69 @@ function extractSongs(data) {
  * 搜索：先加密接口，不行再回退明文接口。
  * 两个都空的时候，把各自的原因一并回给前端，别让页面只会说「没搜到」。
  */
-async function search(q, limit, env) {
+/** 搜歌单：走同一个 cloudsearch，type=1000 */
+async function searchPlaylistsWeapi(q, limit, offset, env) {
+  const data = await weapiPost(
+    '/weapi/cloudsearch/pc',
+    { s: q, type: 1000, limit, offset: offset || 0, total: true, csrf_token: '' },
+    env
+  );
+
+  if (data.code !== 200 || !data.result) {
+    throw new Error(`加密搜歌单 code=${data.code}${data.message ? ' ' + data.message : ''}`);
+  }
+
+  const list = data.result.playlists || [];
+  return {
+    total: data.result.playlistCount || list.length,
+    playlists: list.map(mapPlaylist)
+  };
+}
+
+async function searchPlaylistsPlain(q, limit, offset, env) {
+  const url =
+    `/api/search/get/web?s=${encodeURIComponent(q)}&type=1000&limit=${limit}` +
+    `&offset=${offset || 0}&realIP=${REAL_IP}`;
+  const data = await ne(url, env, { realIP: true });
+  const r = (data && data.result) || {};
+  const list = r.playlists || [];
+  return {
+    total: r.playlistCount || list.length,
+    playlists: list.map(mapPlaylist)
+  };
+}
+
+async function searchPlaylists(q, limit, offset, env) {
   let weapiError = null;
 
   try {
-    const r = await searchWeapi(q, limit, env);
+    const r = await searchPlaylistsWeapi(q, limit, offset, env);
+    if (r.playlists.length) return { ...r, source: 'weapi' };
+    weapiError = '加密接口返回 0 条';
+  } catch (e) {
+    weapiError = String((e && e.message) || e);
+  }
+
+  try {
+    const plain = await searchPlaylistsPlain(q, limit, offset, env);
+    return { ...plain, source: 'plain', weapiError };
+  } catch (e) {
+    return {
+      total: 0,
+      playlists: [],
+      reason: 'error',
+      source: 'none',
+      hint: `搜索歌单失败：${weapiError}`,
+      error: String((e && e.message) || e)
+    };
+  }
+}
+
+async function search(q, limit, offset, env) {
+  let weapiError = null;
+
+  try {
+    const r = await searchWeapi(q, limit, offset, env);
     if (r.songs.length) return { ...r, source: 'weapi' };
     weapiError = '加密接口返回 0 条';
   } catch (e) {
@@ -445,7 +503,7 @@ async function search(q, limit, env) {
 
   let plain;
   try {
-    plain = await searchPlain(q, limit, env);
+    plain = await searchPlain(q, limit, offset, env);
   } catch (e) {
     return {
       total: 0,
@@ -511,26 +569,47 @@ async function lyric(id, env) {
   };
 }
 
-async function songUrl(id, env) {
+/** 音质档位 → 码率。前端传 level，Worker 翻译成网易云要的 br */
+const QUALITY_BR = {
+  standard: 128000,
+  higher: 192000,
+  exhigh: 320000,
+  lossless: 999000,
+  hires: 1900000
+};
+
+async function songUrl(id, env, level) {
+  const want = QUALITY_BR[level] || QUALITY_BR.exhigh;
   let item = null;
 
-  try {
-    const d = await weapiPost(
-      '/weapi/song/enhance/player/url',
-      { ids: JSON.stringify([id]), br: 320000, csrf_token: '' },
-      env
-    );
-    item = (d.data || [])[0];
-  } catch (e) {
-    item = null;
-  }
+  // 高音质拿不到（非 VIP / 无版权）就降到 320k，别让整首歌放不出来
+  const tries = want > QUALITY_BR.exhigh ? [want, QUALITY_BR.exhigh] : [want];
 
-  if (!item || !item.url) {
-    const d = await ne(
-      `/api/song/enhance/player/url?id=${encodeURIComponent(id)}&ids=${encodeURIComponent(`[${id}]`)}&br=320000`,
-      env
-    );
-    item = (d.data || [])[0];
+  for (const br of tries) {
+    try {
+      const d = await weapiPost(
+        '/weapi/song/enhance/player/url',
+        { ids: JSON.stringify([id]), br, csrf_token: '' },
+        env
+      );
+      item = (d.data || [])[0];
+    } catch (e) {
+      item = null;
+    }
+
+    if (!item || !item.url) {
+      try {
+        const d = await ne(
+          `/api/song/enhance/player/url?id=${encodeURIComponent(id)}&ids=${encodeURIComponent(`[${id}]`)}&br=${br}`,
+          env
+        );
+        item = (d.data || [])[0];
+      } catch (e) {
+        item = null;
+      }
+    }
+
+    if (item && item.url) break;
   }
 
   if (!item || !item.url) return null;
@@ -749,15 +828,52 @@ async function qrCheck(key, env) {
   };
 }
 
+/** vipType：11 = 黑胶 VIP，10 = 音乐包，0 = 普通用户（网易云的约定） */
+function vipLabelOf(vipType) {
+  if (vipType === 11) return '黑胶VIP';
+  if (vipType === 10) return '音乐包';
+  return '普通用户';
+}
+
 async function accountInfo(musicU, env) {
   const res = await fetch(`${ORIGIN}/api/nuser/account/get`, { headers: headers(env, { musicU }) });
   const j = await res.json().catch(() => ({}));
+
+  const acc = (j && j.account) || null;
+  const prof = (j && j.profile) || null;
+  // 两个地方都可能给 vipType，取值优先 profile（更全）
+  const vipType = Number((prof && prof.vipType) || (acc && acc.vipType) || 0);
+
   return {
-    ok: Boolean(j && j.account),
-    nickname: (j.account && j.account.userName) || '',
-    userId: (j.profile && j.profile.userId) || null,
-    code: j.code
+    ok: Boolean(acc),
+    nickname: (acc && acc.userName) || (prof && prof.nickname) || '',
+    userId: (prof && prof.userId) || null,
+    avatar: (prof && prof.avatarUrl) || '',
+    level: Number((prof && prof.level) || 0),
+    vipType,
+    vipLabel: vipLabelOf(vipType),
+    code: j && j.code
   };
+}
+
+/** 当前登录账号在网易云里的歌单（收藏 + 自建） */
+async function userPlaylists(uid, env) {
+  const d = await weapiPost(
+    '/weapi/user/playlist',
+    { uid, limit: 100, offset: 0, csrf_token: '' },
+    env
+  );
+
+  const list = (d.playlist || []).map((p) => ({
+    id: p.id,
+    name: p.name,
+    cover: pic(p.coverImgUrl, '300y300'),
+    trackCount: p.trackCount || 0,
+    specialType: p.specialType || 0,
+    creator: (p.creator && p.creator.nickname) || ''
+  }));
+
+  return { uid, playlists: list };
 }
 
 // ---------------------------------------------------------------- 账号 / 会话
@@ -997,11 +1113,39 @@ export default {
         return json(await accountInfo(userU, ctx), 200, request, env);
       }
 
+      // 设置里的「账号」组：昵称 / 等级 / VIP 等级
+      if (url.pathname === '/api/account') {
+        if (!userU) {
+          return json({ ok: false, bound: false, error: '当前账号没有绑定网易云（MUSIC_U）' }, 400, request, env);
+        }
+        const info = await accountInfo(userU, ctx);
+        return json({ ...info, bound: true }, 200, request, env);
+      }
+
+      // 读取当前网易云账号下的歌单，供「导入我的歌单」用
+      if (url.pathname === '/api/myplaylists') {
+        if (!userU) {
+          return json({ ok: false, bound: false, error: '当前账号没有绑定网易云（MUSIC_U）' }, 400, request, env);
+        }
+        const info = await accountInfo(userU, ctx);
+        if (!info.userId) {
+          return json({ ok: false, error: '读不到账号 UID，凭证可能已经失效' }, 400, request, env);
+        }
+        const r = await userPlaylists(info.userId, ctx);
+        return json({ ok: true, ...r }, 200, request, env);
+      }
+
       if (url.pathname === '/api/search') {
         const q = (url.searchParams.get('q') || '').trim();
         if (!q) return json({ error: '缺少 q 参数' }, 400, request, env);
         const limit = Math.min(50, Math.max(1, parseInt(url.searchParams.get('limit'), 10) || 20));
-        return json(await search(q, limit, ctx), 200, request, env);
+        // 网易云超过 ~1000 条会开始返回空/重复，夹一下，别让前端翻出一堆假页
+        const offset = Math.min(1000, Math.max(0, parseInt(url.searchParams.get('offset'), 10) || 0));
+        // kind=playlist 搜歌单，默认搜歌曲（保持老调用方不变）
+        if (url.searchParams.get('kind') === 'playlist') {
+          return json(await searchPlaylists(q, limit, offset, ctx), 200, request, env);
+        }
+        return json(await search(q, limit, offset, ctx), 200, request, env);
       }
 
       // 歌词按歌曲 ID 缓存 1 小时：同一首歌的歌词基本不会变，重复请求没必要再打上游。
@@ -1022,7 +1166,8 @@ export default {
         const id = url.searchParams.get('id');
         if (!id) return json({ error: '缺少 id 参数' }, 400, request, env);
 
-        const target = await songUrl(id, ctx);
+        const level = (url.searchParams.get('level') || 'exhigh').trim();
+        const target = await songUrl(id, ctx, level);
         if (!target) {
           return json({ error: '拿不到播放地址（VIP / 版权受限 / 已下架）' }, 404, request, env);
         }
@@ -1133,7 +1278,7 @@ export default {
 
         // 关键对照：同一条出口 IP，明文接口（会判境外）vs 加密接口（网页版用的）
         try {
-          const r = await searchWeapi(q, 3, env);
+          const r = await searchWeapi(q, 3, 0, env);
           out.searchWeapi = {
             ok: true,
             abroad: r.abroad,
