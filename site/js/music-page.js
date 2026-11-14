@@ -976,7 +976,8 @@
   var AMLL_VER = '?v=20261216';      // 只对本地副本做缓存穿透
   var amllWrap = document.getElementById('amll-wrap');
   var lastLyric = null;
-  var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null };
+  // src 记录到底是从 CDN 还是本地副本加载成功的，设置里要如实显示
+  var amll = { status: 0, waiters: [], player: null, lines: [], raf: 0, last: 0, playing: null, src: '' };
 
   function mobileLayout() {
     return window.matchMedia('(max-width: 900px)').matches;
@@ -1016,6 +1017,7 @@
       amll.status = ok ? 2 : 3;
       clearTimeout(guard);
       amll.waiters.splice(0).forEach(function (fn) { fn(ok); });
+      refreshAmllStatus(); // 设置里的「组件状态」要跟着变
     }
 
     // 组件 392KB，移动网络下可能很慢：6 秒还不就绪就放弃，先用轻量歌词顶着
@@ -1026,10 +1028,14 @@
     first
       .then(function (ok) {
         if (ok) {
+          amll.src = 'cdn';
           done(true);
           return;
         }
-        return loadAmllFrom(AMLL_LOCAL, true).then(done);
+        return loadAmllFrom(AMLL_LOCAL, true).then(function (ok2) {
+          if (ok2) amll.src = 'local';
+          done(ok2);
+        });
       })
       .catch(function () { done(false); });
 
@@ -3139,12 +3145,102 @@
   var bgHue = null;
   var setTrans = $('set-trans');
   var setAmll = $('set-amll');
+  var amllStatusEl = $('amll-status');
+  var amllLoadBtn = $('amll-load');
+  var amllHintEl = $('amll-hint');
   var setBold = $('set-bold');
   var setDebug = $('set-debug');
   var setOffset = $('set-offset');
   var setOffsetVal = $('set-offset-val');
   var setSize = $('set-size');
   var setSizeVal = $('set-size-val');
+
+  /**
+   * 设置 → 歌词里的「组件状态」：把 AMLL 的真实状态画出来，并决定按钮能不能点。
+   * 关掉 AMLL 开关时显示「已关闭」—— 这时候加载也没意义，按钮一并禁用。
+   */
+  function refreshAmllStatus() {
+    if (!amllStatusEl) return;
+
+    var off = !wantAmll();
+    var st = amll.status;
+
+    var key;
+    var text;
+    var hint;
+    var canLoad = false;
+    var btnText = '加载组件';
+
+    if (off) {
+      key = 'off';
+      text = '已关闭';
+      hint = 'AMLL 开关关着，大屏和歌词栏都用轻量歌词。打开开关后可以在这里手动加载组件。';
+    } else if (st === 1) {
+      key = 'loading';
+      text = '加载中';
+      hint = '正在下载 AMLL 组件（约 390KB），首次打开可能要几秒。';
+      btnText = '加载中…';
+    } else if (st === 2) {
+      key = 'ready';
+      text = '已就绪';
+      hint = '组件已加载' + (amll.src === 'local' ? '（本地副本 /vendor）' : amll.src === 'cdn' ? '（CDN）' : '') +
+        '，大屏与歌词栏都是逐字点亮。';
+      btnText = '已加载';
+    } else if (st === 3) {
+      key = 'failed';
+      text = '加载失败';
+      hint = 'CDN 和本地副本都没取到，可能是网络慢或广告拦截插件挡了脚本。可以点按钮重试。';
+      canLoad = true;
+      btnText = '重试加载';
+    } else {
+      key = 'idle';
+      text = '未加载';
+      hint = '组件还没下载。点下面的按钮立即加载；不管它的话，打开大屏或歌词栏时也会自动加载。';
+      canLoad = true;
+    }
+
+    amllStatusEl.textContent = text;
+    amllStatusEl.setAttribute('data-s', key);
+    if (amllHintEl) amllHintEl.textContent = hint;
+
+    if (amllLoadBtn) {
+      amllLoadBtn.textContent = btnText;
+      amllLoadBtn.disabled = !canLoad;
+      amllLoadBtn.setAttribute('aria-busy', st === 1 && !off ? 'true' : 'false');
+    }
+  }
+
+  if (amllLoadBtn) {
+    amllLoadBtn.addEventListener('click', function () {
+      if (!wantAmll()) {
+        toast('先在设置里打开「AMLL 逐字歌词」');
+        return;
+      }
+      if (amll.status === 1) return;
+
+      // 失败过就把状态机和等待队列清干净，否则 loadAmll() 会直接返回 false
+      if (amll.status === 3) {
+        amll.status = 0;
+        amll.src = '';
+        amll.waiters = [];
+      }
+
+      var p = loadAmll();
+      refreshAmllStatus();
+
+      p.then(function (ok) {
+        refreshAmllStatus();
+        if (!ok) {
+          toast('AMLL 加载失败，可以稍后重试');
+          return;
+        }
+        toast('AMLL 组件已就绪');
+        // 正在放歌的话立刻换成逐字歌词，不用重开大屏
+        if (lastLyric) applyLyric();
+        amllPrefetched = true; // 已经手动下过了，别再触发预取
+      });
+    });
+  }
 
   function syncSettingsUI() {
     var btns = segScheme.querySelectorAll('button');
@@ -3192,6 +3288,7 @@
 
     setTrans.checked = settings.trans;
     setAmll.checked = settings.amll !== false;
+    refreshAmllStatus();
     setBold.checked = settings.bold === true;
     setDebug.checked = settings.debug === true;
     setOffset.value = String(settings.offset || 0);
@@ -3511,6 +3608,7 @@
 
   setAmll.addEventListener('change', function () {
     settings.amll = setAmll.checked;
+    refreshAmllStatus();
     saveSettings();
     // 关掉 AMLL 后侧栏就没有渲染器了，直接收起来，别留一屏旧歌词
     if (!settings.amll) closeLyricDrawer();
@@ -3537,8 +3635,9 @@
   var LIB_KEY = 'music-library';
   var lib = loadLib();
   var currentPlaylist = null;
-  var pendingSong = null;
-  var newPendingSong = null;
+  var pendingSong = null;      // 单曲加入时的待加入歌曲
+  var pendingBatch = null;     // 多选批量加入时的歌曲数组
+  var newPendingSongs = [];    // 「新建歌单并加入」要带过去的歌（0/1/多）
 
   function loadLib() {
     try {
@@ -4676,6 +4775,7 @@
     var n = pickCount();
     var total = (currentPlaylist && currentPlaylist.tracks ? currentPlaylist.tracks.length : 0);
     $('pl-bulk-count').textContent = '已选 ' + n + ' / ' + total + ' 首';
+    $('pl-bulk-add').disabled = n === 0;
     $('pl-bulk-del').disabled = n === 0;
     $('pl-bulk-all').textContent = n && n === total ? '取消全选' : '全选';
   }
@@ -4740,6 +4840,17 @@
 
   // 删除是两段式：第一次点只是「上膛」，3 秒内再点一次才真的删，
   // 避免误触一下就把整列歌曲清掉（没有撤销）。
+  // 多选 → 加入别的歌单：目标不包含当前歌单自己（勾的就是这里的歌，加回去必然全重复）
+  $('pl-bulk-add').addEventListener('click', function () {
+    var list = (currentPlaylist && currentPlaylist.tracks) || [];
+    var songs = list.filter(function (t) { return t && picked[t.id]; });
+    if (!songs.length) {
+      toast('先勾几首');
+      return;
+    }
+    openAddForSongs(songs, currentPlaylist.id);
+  });
+
   $('pl-bulk-del').addEventListener('click', function () {
     var btn = this;
     var n = pickCount();
@@ -4904,14 +5015,14 @@
 
   $('new-playlist').addEventListener('click', function () {
     closeSidebar();
-    newPendingSong = null; // 从侧边栏进来就是纯新建，别把上一条待加入的歌带进来
+    newPendingSongs = []; // 从侧边栏进来就是纯新建，别把上一条待加入的歌带进来
     $('new-input').value = '';
     openDlg(dlgNew);
     setTimeout(function () { $('new-input').focus(); }, 60);
   });
 
   $('new-close').addEventListener('click', function () {
-    newPendingSong = null;
+    newPendingSongs = [];
     closeDlg(dlgNew);
   });
 
@@ -4923,9 +5034,14 @@
 
     var p = { id: uid('p'), name: name, cover: '', source: 'local', addedAt: Date.now(), tracks: [] };
 
-    if (newPendingSong) {
-      p.tracks.push(newPendingSong);
-      newPendingSong = null;
+    // 新建时把待加入的歌一起放进去（单曲 / 多选批量都走这里），批内按 id 去重
+    if (newPendingSongs.length) {
+      newPendingSongs.forEach(function (t) {
+        if (!t || t.id == null) return;
+        for (var k = 0; k < p.tracks.length; k += 1) if (p.tracks[k].id === t.id) return;
+        p.tracks.push(t);
+      });
+      newPendingSongs = [];
     }
 
     lib.playlists.unshift(p);
@@ -4947,26 +5063,25 @@
     openAddForSong(arr[Number(row.getAttribute('data-i'))]);
   }
 
-  /** 打开「加入歌单」：搜索结果行、播放器上的 ＋ 都走这里 */
-  function openAddForSong(song) {
-    if (!song) return;
-
-    pendingSong = song;
-    newPendingSong = null;
-
-    $('add-song').textContent = song.name + ' · ' + (song.artists || '');
-
+  /**
+   * 渲染可选歌单。excludeId 用来把「当前正在看的歌单」自己排除掉 ——
+   * 多选是从这个歌单里勾的，加入自己必然是全部重复，不如直接不列出来。
+   */
+  function renderAddList(excludeId) {
     var ul = $('add-list');
     ul.innerHTML = '';
 
-    if (!lib.playlists.length) {
+    var list = lib.playlists.filter(function (p) { return p.id !== excludeId; });
+
+    if (!list.length) {
       var tip = document.createElement('li');
       tip.className = 'sheet-note';
-      tip.textContent = '还没有歌单，先建一个';
+      tip.textContent = lib.playlists.length ? '没有别的歌单可以放，先建一个' : '还没有歌单，先建一个';
       ul.appendChild(tip);
+      return;
     }
 
-    lib.playlists.forEach(function (p) {
+    list.forEach(function (p) {
       var li = document.createElement('li');
       var b = document.createElement('button');
       b.type = 'button';
@@ -4978,43 +5093,94 @@
       li.appendChild(b);
       ul.appendChild(li);
     });
+  }
 
+  /** 打开「加入歌单」：搜索结果行、播放器上的 ＋ 都走这里 */
+  function openAddForSong(song) {
+    if (!song) return;
+
+    pendingSong = song;
+    pendingBatch = null;
+    newPendingSongs = [];
+
+    $('add-song').textContent = song.name + ' · ' + (song.artists || '');
+    renderAddList('');
+    openDlg(dlgAdd);
+  }
+
+  /** 多选批量加入：和单曲共用同一个弹窗，只是待加入的是一批 */
+  function openAddForSongs(songs, sourceId) {
+    if (!songs || !songs.length) return;
+
+    pendingSong = null;
+    pendingBatch = songs.slice();
+    newPendingSongs = [];
+
+    $('add-song').textContent = '已选 ' + songs.length + ' 首，选一个歌单放进去';
+    renderAddList(sourceId || '');
     openDlg(dlgAdd);
   }
 
   function addSongTo(p) {
-    if (!pendingSong) return;
+    var songs = pendingBatch || (pendingSong ? [pendingSong] : []);
+    if (!songs.length) return;
 
-    for (var i = 0; i < p.tracks.length; i += 1) {
-      if (p.tracks[i].id === pendingSong.id) {
-        toast('「' + p.name + '」里已经有这首了');
-        closeDlg(dlgAdd);
-        return;
+    var before = p.tracks.length;
+    var added = 0;
+    var dup = 0;
+
+    songs.forEach(function (song) {
+      if (!song || song.id == null) return;
+      for (var i = 0; i < p.tracks.length; i += 1) {
+        if (p.tracks[i].id === song.id) { dup += 1; return; }
       }
-    }
+      p.tracks.push(song);
+      added += 1;
+    });
 
-    p.tracks.push(pendingSong);
-    if (!saveLib()) {
-      p.tracks.pop();
+    if (!added) {
+      clearPendingAdd();
+      closeDlg(dlgAdd);
+      toast(dup > 1 ? '这 ' + dup + ' 首都已经在「' + p.name + '」里了' : '「' + p.name + '」里已经有这首了');
       return;
     }
 
+    if (!saveLib()) {
+      // 存不下就把刚加进去的整批撤掉，别让内存和本地存的两份不一致
+      p.tracks.length = before;
+      return;
+    }
+
+    clearPendingAdd();
     renderSidebar();
     closeDlg(dlgAdd);
-    toast('已加入「' + p.name + '」');
+
+    if (dup) toast('已加入「' + p.name + '」：新增 ' + added + ' 首，跳过重复 ' + dup + ' 首');
+    else if (added > 1) toast('已加入「' + p.name + '」：' + added + ' 首');
+    else toast('已加入「' + p.name + '」');
 
     if (currentPlaylist && currentPlaylist.id === p.id) openLocal(p.id);
   }
 
+  function clearPendingAdd() {
+    pendingSong = null;
+    pendingBatch = null;
+    newPendingSongs = [];
+  }
+
   $('add-new').addEventListener('click', function () {
-    newPendingSong = pendingSong;
+    // 单曲 / 多选都统一成数组带过去，新建完一次性放进去
+    newPendingSongs = pendingBatch ? pendingBatch.slice() : (pendingSong ? [pendingSong] : []);
     closeDlg(dlgAdd);
     $('new-input').value = '';
     openDlg(dlgNew);
     setTimeout(function () { $('new-input').focus(); }, 60);
   });
 
-  $('add-close').addEventListener('click', function () { closeDlg(dlgAdd); });
+  $('add-close').addEventListener('click', function () {
+    clearPendingAdd();
+    closeDlg(dlgAdd);
+  });
 
   /* ------------------------------------------------------------------ 编辑歌单 */
   var DEFAULT_COVER = '/img/playlist.webp';

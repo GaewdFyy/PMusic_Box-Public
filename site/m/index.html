@@ -8,7 +8,7 @@
 <meta name="robots" content="noindex, nofollow">
 <title>私享音乐盒</title>
 <link rel="icon" href="/favicon.svg">
-<link rel="stylesheet" href="/css/music-page.css?v=20261232">
+<link rel="stylesheet" href="/css/music-page.css?v=20261234">
 <script>
   (function () {
     // 首屏防闪：先按本地设置把深浅色和歌词字号贴上去，主脚本后面还会再对齐一次
@@ -222,6 +222,7 @@
         <span class="pl-bulk-count" id="pl-bulk-count">已选 0 首</span>
         <div class="pl-bulk-acts">
           <button class="btn sm" id="pl-bulk-all" type="button">全选</button>
+          <button class="btn sm" id="pl-bulk-add" type="button" disabled>加入歌单</button>
           <button class="btn sm danger" id="pl-bulk-del" type="button" disabled>删除所选</button>
           <button class="btn sm" id="pl-bulk-cancel" type="button">取消</button>
         </div>
@@ -649,7 +650,14 @@
         <label class="set-label" for="set-amll">AMLL 逐字歌词</label>
         <input class="switch" type="checkbox" id="set-amll">
       </div>
-      <p class="set-note">桌面和手机的大屏都用 AMLL（逐字点亮、弹性滚动）；加载失败会自动退回轻量歌词。</p>
+
+      <div class="set-row">
+        <span class="set-label">组件状态</span>
+        <span class="amll-chip" id="amll-status" data-s="idle">未加载</span>
+      </div>
+
+      <button class="btn block amll-load-btn" id="amll-load" type="button">加载组件</button>
+      <p class="set-note" id="amll-hint">桌面和手机的大屏都用 AMLL（逐字点亮、弹性滚动）；加载失败会自动退回轻量歌词。</p>
 
       <div class="set-row">
         <span class="set-label">右侧歌词栏</span>
@@ -897,7 +905,7 @@
   window.MUSIC_TOKEN = '';
 </script>
 <!-- 改了 css/js 就顺手把 v= 改一下，否则浏览器 / Cloudflare 边缘会继续用旧缓存 -->
-<script src="/js/music-page.js?v=20261232" defer></script>
+<script src="/js/music-page.js?v=20261234" defer></script>
 
 </body>
 </html>
